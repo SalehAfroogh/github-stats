@@ -37,12 +37,48 @@ jobs:
         git pull
         git checkout generated || git checkout -b generated
 
+    - name: Exclude Jupyter-heavy private repos
+      # Runs without command tracing and never prints repo names, so private
+      # repository names stay out of the public logs.
+      shell: bash {0}
+      env:
+        ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+      run: |
+        set +x
+        python3 - <<'PY'
+        import json, os, urllib.request
+        tok = os.environ["ACCESS_TOKEN"]
+        def get(url):
+            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"})
+            with urllib.request.urlopen(req) as r:
+                return json.load(r)
+        repos, page = [], 1
+        while True:
+            batch = get(f"https://api.github.com/user/repos?visibility=private&affiliation=owner,collaborator,organization_member&per_page=100&page={page}")
+            repos += batch
+            if len(batch) < 100: break
+            page += 1
+        excluded = []
+        for r in repos:
+            langs = get(r["languages_url"])
+            total = sum(langs.values())
+            if total and langs.get("Jupyter Notebook", 0) / total >= 0.5:
+                excluded.append(r["full_name"])
+        extra = os.environ.get("EXTRA_EXCLUDE", "")
+        value = ",".join([x for x in [extra] if x] + excluded)
+        for name in excluded:
+            print(f"::add-mask::{name}")
+        with open(os.environ["GITHUB_ENV"], "a") as f:
+            f.write(f"EXCLUDE_REPOS={value}\n")
+        print(f"Checked {len(repos)} private repos; excluding {len(excluded)} that are mostly Jupyter Notebook.")
+        PY
+
     - name: Generate images
       run: |
         ./zig-out/bin/github-stats
       env:
         ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
-        EXCLUDE_REPOS: ${{ secrets.EXCLUDE_REPOS }}
+        EXCLUDE_REPOS: ${{ env.EXCLUDE_REPOS }}
         EXCLUDE_LANGS: ${{ secrets.EXCLUDE_LANGS }}
         EXCLUDE_PRIVATE: "false"
         SILENT: "true"
