@@ -43,6 +43,7 @@ jobs:
       shell: bash {0}
       env:
         ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+        EXTRA_EXCLUDE: SalehAfroogh/github-stats
       run: |
         set +x
         python3 - <<'PY'
